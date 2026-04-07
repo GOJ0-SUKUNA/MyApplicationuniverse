@@ -37,7 +37,10 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         val color: FloatArray,
         val tilt: Float,
         val kind: String,
-        val description: String
+        val description: String,
+        val atmosphere: Boolean,
+        val ringed: Boolean,
+        val moonCount: Int
     )
 
     var yaw = 0.35f
@@ -144,6 +147,7 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             if (selectedStarIndex >= 0 && selectedStarIndex < stars.size) {
                 val s = stars[selectedStarIndex]
                 drawSinglePoint(s.x, s.y, s.z, floatArrayOf(1f, 1f, 1f, 1f), 18f, mvp)
+                drawSinglePoint(s.x, s.y, s.z, floatArrayOf(1f, 1f, 1f, 0.7f), 26f, mvp)
             }
         } else {
             drawLocalSystem()
@@ -157,55 +161,29 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         System.arraycopy(mvp, 0, currentMvp, 0, 16)
 
         if (!exoticMode) {
-            drawSinglePoint(0f, 0f, 0f, localStarColor, 26f, mvp)
-            drawSinglePoint(0f, 0f, 0f, floatArrayOf(localStarColor[0], localStarColor[1], localStarColor[2], 1f), 48f, mvp)
+            drawStarVisual(0f, 0f, 0f, localStarColor, mvp)
         } else {
             drawBlackHoleSystem(mvp)
         }
 
         if (selectedLocalIndex == -1) {
-            drawSinglePoint(0f, 0f, 0f, floatArrayOf(1f, 1f, 1f, 1f), 54f, mvp)
+            drawSinglePoint(0f, 0f, 0f, floatArrayOf(1f, 1f, 1f, 1f), 58f, mvp)
         }
 
         val orbitLinePositions = ArrayList<Float>()
         val orbitLineColors = ArrayList<Float>()
-        val localPositions = ArrayList<Float>()
-        val localColors = ArrayList<Float>()
-        val selectedPositions = ArrayList<Float>()
-        val selectedColors = ArrayList<Float>()
 
         for ((i, b) in systemBodies.withIndex()) {
-            val a = angle * b.speed + i * 1.15f
-            val px = cos(a.toDouble()).toFloat() * b.radius
-            val py = sin((a * 0.35f).toDouble()).toFloat() * b.tilt
-            val pz = sin(a.toDouble()).toFloat() * b.radius
+            val p = localBodyPosition(i, b)
+            val px = p[0]
+            val py = p[1]
+            val pz = p[2]
 
-            localPositions.add(px)
-            localPositions.add(py)
-            localPositions.add(pz)
+            drawOrbitBody(px, py, pz, b, mvp, selectedLocalIndex == i)
 
-            localColors.add(b.color[0])
-            localColors.add(b.color[1])
-            localColors.add(b.color[2])
-            localColors.add(1f)
-
-            if (selectedLocalIndex == i) {
-                selectedPositions.add(px)
-                selectedPositions.add(py)
-                selectedPositions.add(pz)
-
-                selectedColors.add(1f)
-                selectedColors.add(1f)
-                selectedColors.add(1f)
-                selectedColors.add(1f)
-            }
-
-            if (b.kind == "Planet") {
-                val moonAngle = angle * (b.speed * 2.4f) + i * 0.65f
-                val mx = px + cos(moonAngle.toDouble()).toFloat() * 0.35f
-                val my = py + sin((moonAngle * 0.5f).toDouble()).toFloat() * 0.04f
-                val mz = pz + sin(moonAngle.toDouble()).toFloat() * 0.35f
-                drawSinglePoint(mx, my, mz, floatArrayOf(0.8f, 0.82f, 0.88f, 1f), 5f, mvp)
+            repeat(b.moonCount) { mi ->
+                val moonP = localMoonPosition(px, py, pz, i, mi)
+                drawMoonVisual(moonP[0], moonP[1], moonP[2], mvp)
             }
 
             val segments = 72
@@ -233,26 +211,79 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                 mvp
             )
         }
+    }
 
-        if (localPositions.isNotEmpty()) {
-            drawPoints(
-                floatBufferOf(localPositions.toFloatArray()),
-                floatBufferOf(localColors.toFloatArray()),
-                localPositions.size / 3,
-                10f,
-                mvp
-            )
+    private fun drawStarVisual(x: Float, y: Float, z: Float, color: FloatArray, mvpMatrix: FloatArray) {
+        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.35f), 62f, mvpMatrix)
+        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.65f), 40f, mvpMatrix)
+        drawSinglePoint(x, y, z, color, 26f, mvpMatrix)
+    }
+
+    private fun drawMoonVisual(x: Float, y: Float, z: Float, mvpMatrix: FloatArray) {
+        drawSinglePoint(x, y, z, floatArrayOf(0.25f, 0.25f, 0.28f, 1f), 6f, mvpMatrix)
+        drawSinglePoint(x, y, z, floatArrayOf(0.82f, 0.84f, 0.9f, 1f), 5f, mvpMatrix)
+    }
+
+    private fun drawOrbitBody(
+        x: Float,
+        y: Float,
+        z: Float,
+        body: OrbitBody,
+        mvpMatrix: FloatArray,
+        selected: Boolean
+    ) {
+        when {
+            body.kind.contains("Gas", ignoreCase = true) -> {
+                drawSinglePoint(x, y, z, floatArrayOf(body.color[0], body.color[1], body.color[2], 0.4f), body.size * 2.0f, mvpMatrix)
+                drawSinglePoint(x, y, z, body.color, body.size * 1.35f, mvpMatrix)
+                if (body.ringed) {
+                    drawPlanetRing(x, y, z, body.size * 0.12f + 0.55f, mvpMatrix)
+                }
+            }
+
+            body.atmosphere -> {
+                drawSinglePoint(x, y, z, floatArrayOf(body.color[0], body.color[1], body.color[2], 0.3f), body.size * 1.8f, mvpMatrix)
+                drawSinglePoint(x, y, z, body.color, body.size, mvpMatrix)
+            }
+
+            else -> {
+                drawSinglePoint(x, y, z, floatArrayOf(body.color[0] * 0.35f, body.color[1] * 0.35f, body.color[2] * 0.35f, 1f), body.size * 1.15f, mvpMatrix)
+                drawSinglePoint(x, y, z, body.color, body.size, mvpMatrix)
+            }
         }
 
-        if (selectedPositions.isNotEmpty()) {
-            drawPoints(
-                floatBufferOf(selectedPositions.toFloatArray()),
-                floatBufferOf(selectedColors.toFloatArray()),
-                selectedPositions.size / 3,
-                18f,
-                mvp
-            )
+        if (selected) {
+            drawSinglePoint(x, y, z, floatArrayOf(1f, 1f, 1f, 0.8f), body.size * 2.15f, mvpMatrix)
         }
+    }
+
+    private fun drawPlanetRing(x: Float, y: Float, z: Float, radius: Float, mvpMatrix: FloatArray) {
+        val positions = ArrayList<Float>()
+        val colors = ArrayList<Float>()
+        val segments = 80
+
+        for (i in 0..segments) {
+            val t = (i.toFloat() / segments.toFloat()) * (Math.PI.toFloat() * 2f)
+            val rx = x + cos(t.toDouble()).toFloat() * radius
+            val ry = y + sin((t * 0.5f).toDouble()).toFloat() * 0.08f
+            val rz = z + sin(t.toDouble()).toFloat() * radius
+
+            positions.add(rx)
+            positions.add(ry)
+            positions.add(rz)
+
+            colors.add(0.9f)
+            colors.add(0.8f)
+            colors.add(0.55f)
+            colors.add(1f)
+        }
+
+        drawLines(
+            floatBufferOf(positions.toFloatArray()),
+            floatBufferOf(colors.toFloatArray()),
+            positions.size / 3,
+            mvpMatrix
+        )
     }
 
     private fun drawBlackHoleSystem(mvpMatrix: FloatArray) {
@@ -284,7 +315,7 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         )
 
         drawSinglePoint(0f, 0f, 0f, floatArrayOf(0.08f, 0.08f, 0.12f, 1f), 36f, mvpMatrix)
-        drawSinglePoint(0f, 0f, 0f, floatArrayOf(0.35f, 0.45f, 0.95f, 1f), 52f, mvpMatrix)
+        drawSinglePoint(0f, 0f, 0f, floatArrayOf(0.35f, 0.45f, 0.95f, 0.55f), 54f, mvpMatrix)
     }
 
     private fun buildUniverse(count: Int) {
@@ -413,14 +444,6 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         nebulaColorBuffer = floatBufferOf(colors)
     }
 
-    fun pickAt(screenX: Float, screenY: Float) {
-        if (mode == 0) {
-            pickGalaxyStar(screenX, screenY)
-        } else {
-            pickLocalBody(screenX, screenY)
-        }
-    }
-
     private fun pickGalaxyStar(screenX: Float, screenY: Float) {
         var best = -1
         var bestDist = Float.MAX_VALUE
@@ -527,6 +550,9 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                     "\nOrbit radius: " + String.format("%.2f", b.radius) +
                     "\nOrbit speed factor: " + String.format("%.2f", b.speed) +
                     "\nSize: " + String.format("%.1f", b.size) +
+                    "\nAtmosphere: " + if (b.atmosphere) "yes" else "no" +
+                    "\nRinged: " + if (b.ringed) "yes" else "no" +
+                    "\nMoons: " + b.moonCount +
                     "\nNote: " + b.description
             )
         } else {
@@ -547,6 +573,10 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         val sx = (ndcX * 0.5f + 0.5f) * widthPx
         val sy = (1f - (ndcY * 0.5f + 0.5f)) * heightPx
         return floatArrayOf(sx, sy)
+    }
+
+    fun pickAt(screenX: Float, screenY: Float) {
+        if (mode == 0) pickGalaxyStar(screenX, screenY) else pickLocalBody(screenX, screenY)
     }
 
     fun toggleSystemMode() {
@@ -607,34 +637,91 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
 
         val colors = listOf(
             floatArrayOf(0.4f, 0.9f, 1.0f, 1f),
-            floatArrayOf(0.4f, 1.0f, 0.5f, 1f),
+            floatArrayOf(0.5f, 1.0f, 0.6f, 1f),
             floatArrayOf(1.0f, 0.45f, 0.35f, 1f),
-            floatArrayOf(0.9f, 0.8f, 0.35f, 1f),
+            floatArrayOf(0.92f, 0.82f, 0.38f, 1f),
             floatArrayOf(0.75f, 0.65f, 1.0f, 1f)
         )
 
-        val descs = listOf(
-            "Inner rocky world",
-            "Temperate atmosphere candidate",
-            "Dense volcanic body",
-            "Ringed gas giant analogue",
-            "Outer ice giant analogue"
+        systemBodies.add(
+            OrbitBody(
+                name = "Aurelia",
+                radius = 1.3f,
+                speed = 0.82f,
+                size = 7f,
+                color = colors[0],
+                tilt = 0.08f,
+                kind = "Rocky planet",
+                description = "Hot inner rocky world with thin atmosphere",
+                atmosphere = false,
+                ringed = false,
+                moonCount = 0
+            )
         )
 
-        for (i in 0 until 5) {
-            systemBodies.add(
-                OrbitBody(
-                    name = "Planet-" + (i + 1),
-                    radius = 1.4f + i * 1.2f,
-                    speed = 0.7f / (1f + i * 0.35f),
-                    size = 7f + i,
-                    color = colors[i % colors.size],
-                    tilt = (if (i % 2 == 0) 0.12f else -0.12f) * (i + 1),
-                    kind = if (i < 3) "Planet" else "Gas giant",
-                    description = descs[i % descs.size]
-                )
+        systemBodies.add(
+            OrbitBody(
+                name = "Pelagia",
+                radius = 2.3f,
+                speed = 0.56f,
+                size = 9f,
+                color = colors[1],
+                tilt = -0.11f,
+                kind = "Temperate planet",
+                description = "Atmospheric world with ocean-like color balance",
+                atmosphere = true,
+                ringed = false,
+                moonCount = 1
             )
-        }
+        )
+
+        systemBodies.add(
+            OrbitBody(
+                name = "Pyra",
+                radius = 3.6f,
+                speed = 0.39f,
+                size = 8f,
+                color = colors[2],
+                tilt = 0.16f,
+                kind = "Volcanic planet",
+                description = "Hot fractured crust and unstable surface conditions",
+                atmosphere = true,
+                ringed = false,
+                moonCount = 0
+            )
+        )
+
+        systemBodies.add(
+            OrbitBody(
+                name = "Titanis",
+                radius = 5.1f,
+                speed = 0.28f,
+                size = 14f,
+                color = colors[3],
+                tilt = -0.18f,
+                kind = "Gas giant",
+                description = "Massive ringed atmosphere-dominated giant",
+                atmosphere = true,
+                ringed = true,
+                moonCount = 2
+            )
+        )
+
+        systemBodies.add(
+            OrbitBody(
+                name = "Nyx",
+                radius = 6.8f,
+                speed = 0.22f,
+                size = 10f,
+                color = colors[4],
+                tilt = 0.22f,
+                kind = "Ice giant",
+                description = "Cold outer planet with deep haze and icy upper layers",
+                atmosphere = true,
+                ringed = false,
+                moonCount = 1
+            )
+        )
     }
 
     private fun localBodyPosition(index: Int, b: OrbitBody): FloatArray {
@@ -643,6 +730,23 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         val py = sin((a * 0.35f).toDouble()).toFloat() * b.tilt
         val pz = sin(a.toDouble()).toFloat() * b.radius
         return floatArrayOf(px, py, pz)
+    }
+
+    private fun localMoonPosition(
+        parentX: Float,
+        parentY: Float,
+        parentZ: Float,
+        bodyIndex: Int,
+        moonIndex: Int
+    ): FloatArray {
+        val moonAngle = angle * (1.35f + moonIndex * 0.22f) + bodyIndex * 0.9f + moonIndex * 1.7f
+        val moonRadius = 0.35f + moonIndex * 0.18f
+
+        val mx = parentX + cos(moonAngle.toDouble()).toFloat() * moonRadius
+        val my = parentY + sin((moonAngle * 0.5f).toDouble()).toFloat() * (0.04f + moonIndex * 0.01f)
+        val mz = parentZ + sin(moonAngle.toDouble()).toFloat() * moonRadius
+
+        return floatArrayOf(mx, my, mz)
     }
 
     private fun drawPoints(
