@@ -9,6 +9,9 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 
@@ -17,11 +20,11 @@ class UniverseView(context: Context) : View(context) {
     private val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = 34f
+        textSize = 32f
     }
     private val smallTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.LTGRAY
-        textSize = 28f
+        textSize = 26f
     }
     private val hudPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(155, 15, 18, 24)
@@ -34,6 +37,10 @@ class UniverseView(context: Context) : View(context) {
     private val plusButton = RectF(120f, 24f, 204f, 88f)
     private val modeButton = RectF(216f, 24f, 360f, 88f)
     private val backButton = RectF(372f, 24f, 500f, 88f)
+    private val yawMinusButton = RectF(512f, 24f, 626f, 88f)
+    private val yawPlusButton = RectF(638f, 24f, 752f, 88f)
+    private val pitchMinusButton = RectF(764f, 24f, 878f, 88f)
+    private val pitchPlusButton = RectF(890f, 24f, 1004f, 88f)
 
     private val sun = Body(
         name = "Sun",
@@ -44,7 +51,9 @@ class UniverseView(context: Context) : View(context) {
         vy = 0.0,
         mass = 150000.0,
         radius = 24f,
-        color = Color.YELLOW
+        color = Color.YELLOW,
+        z = 0.0,
+        vz = 0.0
     )
 
     private val earth = Body(
@@ -56,7 +65,9 @@ class UniverseView(context: Context) : View(context) {
         vy = 330.0,
         mass = 400.0,
         radius = 9f,
-        color = Color.CYAN
+        color = Color.CYAN,
+        z = 10.0,
+        vz = 0.0
     )
 
     private val verd = Body(
@@ -68,7 +79,9 @@ class UniverseView(context: Context) : View(context) {
         vy = 245.0,
         mass = 260.0,
         radius = 11f,
-        color = Color.GREEN
+        color = Color.GREEN,
+        z = -18.0,
+        vz = 0.0
     )
 
     private val crimson = Body(
@@ -80,7 +93,9 @@ class UniverseView(context: Context) : View(context) {
         vy = 205.0,
         mass = 180.0,
         radius = 12f,
-        color = Color.RED
+        color = Color.RED,
+        z = 28.0,
+        vz = 0.0
     )
 
     private val moon = Body(
@@ -92,7 +107,9 @@ class UniverseView(context: Context) : View(context) {
         vy = earth.vy + 520.0,
         mass = 20.0,
         radius = 5f,
-        color = Color.LTGRAY
+        color = Color.LTGRAY,
+        z = earth.z + 6.0,
+        vz = 4.0
     )
 
     private val planets = mutableListOf(earth, verd, crimson)
@@ -102,7 +119,7 @@ class UniverseView(context: Context) : View(context) {
     private val localBodies = mutableListOf<Body>()
 
     private data class BgStar(val x: Float, val y: Float, val r: Float, val a: Int)
-    private val backgroundStars = MutableList(220) {
+    private val backgroundStars = MutableList(240) {
         BgStar(
             x = Random(42 + it).nextFloat(),
             y = Random(420 + it).nextFloat(),
@@ -125,6 +142,10 @@ class UniverseView(context: Context) : View(context) {
     private var offsetY = 0f
     private var cameraTargetOffsetX = 0f
     private var cameraTargetOffsetY = 0f
+
+    private var cameraYaw = 0.55
+    private var cameraPitch = 0.35
+    private val cameraDistance = 1800.0
 
     private var lastTouchX = 0f
     private var lastTouchY = 0f
@@ -168,11 +189,7 @@ class UniverseView(context: Context) : View(context) {
         val dt = dtRaw * timeScale
 
         if (!paused) {
-            if (detailMode) {
-                updateLocalPhysics(dt)
-            } else {
-                updatePhysics(dt)
-            }
+            if (detailMode) updateLocalPhysics(dt) else updatePhysics(dt)
         }
 
         updateCameraFocus()
@@ -193,35 +210,6 @@ class UniverseView(context: Context) : View(context) {
         postInvalidateOnAnimation()
     }
 
-    private fun drawMainScene(canvas: Canvas, cx: Float, cy: Float) {
-        drawBody(canvas, sun, cx, cy)
-        for (planet in planets) {
-            drawTrail(canvas, planet, cx, cy, Color.argb(110, 90, 90, 110))
-            drawBody(canvas, planet, cx, cy)
-        }
-        for (m in moons) {
-            drawTrail(canvas, m, cx, cy, Color.argb(100, 110, 110, 110))
-            drawBody(canvas, m, cx, cy)
-        }
-        for (sat in liveSatellites) {
-            drawTrail(canvas, sat, cx, cy, Color.argb(65, 180, 180, 180))
-            drawBody(canvas, sat, cx, cy)
-        }
-        for (neo in liveNeos) {
-            drawTrail(canvas, neo, cx, cy, Color.argb(70, 120, 120, 120))
-            drawBody(canvas, neo, cx, cy)
-        }
-    }
-
-    private fun drawDetailScene(canvas: Canvas, cx: Float, cy: Float) {
-        val focus = selectedBody ?: return
-        drawBody(canvas, focus.copy(x = 0.0, y = 0.0), cx, cy)
-        for (b in localBodies) {
-            drawTrail(canvas, b, cx, cy, Color.argb(100, 120, 120, 130))
-            drawBody(canvas, b, cx, cy)
-        }
-    }
-
     private fun drawBackground(canvas: Canvas) {
         val px = offsetX * 0.08f
         val py = offsetY * 0.08f
@@ -233,14 +221,48 @@ class UniverseView(context: Context) : View(context) {
         }
     }
 
+    private fun drawMainScene(canvas: Canvas, cx: Float, cy: Float) {
+        for (planet in planets) drawTrail(canvas, planet, cx, cy, Color.argb(110, 90, 90, 110))
+        for (m in moons) drawTrail(canvas, m, cx, cy, Color.argb(100, 110, 110, 110))
+        for (sat in liveSatellites) drawTrail(canvas, sat, cx, cy, Color.argb(65, 180, 180, 180))
+        for (neo in liveNeos) drawTrail(canvas, neo, cx, cy, Color.argb(70, 120, 120, 120))
+
+        val bodies = mutableListOf<Body>()
+        bodies.add(sun)
+        bodies.addAll(planets)
+        bodies.addAll(moons)
+        bodies.addAll(liveSatellites)
+        bodies.addAll(liveNeos)
+
+        for (b in bodies.sortedBy { depthForSort(it.x, it.y, it.z) }) {
+            drawBody(canvas, b, cx, cy)
+        }
+    }
+
+    private fun drawDetailScene(canvas: Canvas, cx: Float, cy: Float) {
+        val focus = selectedBody ?: return
+        val centerBody = focus.copy(x = 0.0, y = 0.0, z = 0.0)
+        drawBody(canvas, centerBody, cx, cy)
+
+        for (b in localBodies) {
+            drawTrail(canvas, b, cx, cy, Color.argb(100, 120, 120, 130))
+        }
+        for (b in localBodies.sortedBy { depthForSort(it.x, it.y, it.z) }) {
+            drawBody(canvas, b, cx, cy)
+        }
+    }
+
     private fun updateCameraFocus() {
-        val target = selectedBody
         if (detailMode) {
             cameraTargetOffsetX = 0f
             cameraTargetOffsetY = 0f
-        } else if (target != null) {
-            cameraTargetOffsetX = -target.x.toFloat() * scaleFactor
-            cameraTargetOffsetY = -target.y.toFloat() * scaleFactor
+        } else {
+            val target = selectedBody
+            if (target != null) {
+                val p = project(target.x, target.y, target.z)
+                cameraTargetOffsetX = -p[0].toFloat()
+                cameraTargetOffsetY = -p[1].toFloat()
+            }
         }
 
         offsetX += (cameraTargetOffsetX - offsetX) * 0.08f
@@ -254,6 +276,15 @@ class UniverseView(context: Context) : View(context) {
         Thread {
             val sats = LiveAstronomyRepository.fetchCelesTrakStations(earth.x, earth.y)
             val neos = LiveAstronomyRepository.fetchTodayNeoBodies(sun.x, sun.y)
+
+            sats.forEachIndexed { i, b ->
+                b.z = if (i % 2 == 0) 10.0 + i * 3.0 else -10.0 - i * 3.0
+                b.vz = if (i % 2 == 0) 1.5 else -1.5
+            }
+            neos.forEachIndexed { i, b ->
+                b.z = if (i % 2 == 0) 35.0 + i * 8.0 else -35.0 - i * 8.0
+                b.vz = if (i % 2 == 0) 2.0 else -2.0
+            }
 
             post {
                 liveSatellites.clear()
@@ -275,27 +306,17 @@ class UniverseView(context: Context) : View(context) {
 
     private fun updatePhysics(dt: Double) {
         for (planet in planets) {
-            updateOrbiter(planet, sun, dt, gSun, 520)
+            updateOrbiter3D(planet, sun, dt, gSun, 520)
         }
 
-        val dx = earth.x - moon.x
-        val dy = earth.y - moon.y
-        val distSq = dx * dx + dy * dy + softening
-        val dist = sqrt(distSq)
-        val accel = gMoon * earth.mass / distSq
-        moon.vx += accel * dx / dist * dt
-        moon.vy += accel * dy / dist * dt
-        moon.x += moon.vx * dt
-        moon.y += moon.vy * dt
-        moon.trail.add(moon.x to moon.y)
-        if (moon.trail.size > 260) moon.trail.removeAt(0)
+        updateOrbiter3D(moon, earth, dt, gMoon, 260)
 
         for (sat in liveSatellites) {
-            updateOrbiter(sat, earth, dt, gEarth, 150)
+            updateOrbiter3D(sat, earth, dt, gEarth, 150)
         }
 
         for (neo in liveNeos) {
-            updateOrbiter(neo, sun, dt, gSun * 0.75, 190)
+            updateOrbiter3D(neo, sun, dt, gSun * 0.75, 190)
         }
     }
 
@@ -304,37 +325,44 @@ class UniverseView(context: Context) : View(context) {
         for (body in localBodies) {
             val dx = -body.x
             val dy = -body.y
-            val distSq = dx * dx + dy * dy + 12.0
+            val dz = -body.z
+            val distSq = dx * dx + dy * dy + dz * dz + 12.0
             val dist = sqrt(distSq)
             val accel = 260.0 * center.mass / distSq
 
             body.vx += accel * dx / dist * dt
             body.vy += accel * dy / dist * dt
+            body.vz += accel * dz / dist * dt
 
             body.x += body.vx * dt
             body.y += body.vy * dt
+            body.z += body.vz * dt
 
             body.trail.add(body.x to body.y)
             if (body.trail.size > 240) body.trail.removeAt(0)
         }
     }
 
-    private fun updateOrbiter(body: Body, parent: Body, dt: Double, g: Double, trailLimit: Int) {
+    private fun updateOrbiter3D(body: Body, parent: Body, dt: Double, g: Double, trailLimit: Int) {
         val dx = parent.x - body.x
         val dy = parent.y - body.y
+        val dz = parent.z - body.z
 
-        val distSq = dx * dx + dy * dy + softening
+        val distSq = dx * dx + dy * dy + dz * dz + softening
         val dist = sqrt(distSq)
 
         val accel = g * parent.mass / distSq
         val ax = accel * dx / dist
         val ay = accel * dy / dist
+        val az = accel * dz / dist
 
         body.vx += ax * dt
         body.vy += ay * dt
+        body.vz += az * dt
 
         body.x += body.vx * dt
         body.y += body.vy * dt
+        body.z += body.vz * dt
 
         body.trail.add(body.x to body.y)
         if (body.trail.size > trailLimit) {
@@ -342,29 +370,50 @@ class UniverseView(context: Context) : View(context) {
         }
     }
 
+    private fun project(x: Double, y: Double, z: Double): DoubleArray {
+        val cy = cos(cameraYaw)
+        val sy = sin(cameraYaw)
+        val cp = cos(cameraPitch)
+        val sp = sin(cameraPitch)
+
+        val x1 = x * cy - z * sy
+        val z1 = x * sy + z * cy
+
+        val y2 = y * cp - z1 * sp
+        val z2 = y * sp + z1 * cp
+
+        val perspective = cameraDistance / (cameraDistance + z2 + 1.0)
+        return doubleArrayOf(x1 * perspective * scaleFactor, y2 * perspective * scaleFactor, z2, perspective)
+    }
+
+    private fun depthForSort(x: Double, y: Double, z: Double): Double {
+        return project(x, y, z)[2]
+    }
+
     private fun drawBody(canvas: Canvas, body: Body, cx: Float, cy: Float) {
-        val sx = cx + body.x.toFloat() * scaleFactor
-        val sy = cy + body.y.toFloat() * scaleFactor
-        val rr = (body.radius * scaleFactor).coerceAtLeast(2.4f)
+        val p = project(body.x, body.y, body.z)
+        val sx = cx + p[0].toFloat()
+        val sy = cy + p[1].toFloat()
+        val perspective = p[3].toFloat()
+        val rr = max(2.2f, body.radius * perspective * scaleFactor.coerceAtLeast(0.45f))
 
         when (body.kind) {
             "Star" -> {
                 bodyPaint.color = Color.argb(40, 255, 220, 120)
-                canvas.drawCircle(sx, sy, rr * 3.2f, bodyPaint)
+                canvas.drawCircle(sx, sy, rr * 3.0f, bodyPaint)
                 bodyPaint.color = Color.argb(80, 255, 210, 90)
-                canvas.drawCircle(sx, sy, rr * 2.1f, bodyPaint)
+                canvas.drawCircle(sx, sy, rr * 2.0f, bodyPaint)
                 bodyPaint.color = body.color
                 canvas.drawCircle(sx, sy, rr, bodyPaint)
             }
 
             "Planet" -> {
                 bodyPaint.color = Color.argb(60, Color.red(body.color), Color.green(body.color), Color.blue(body.color))
-                canvas.drawCircle(sx, sy, rr * 1.5f, bodyPaint)
+                canvas.drawCircle(sx, sy, rr * 1.45f, bodyPaint)
                 bodyPaint.color = body.color
                 canvas.drawCircle(sx, sy, rr, bodyPaint)
-
-                bodyPaint.color = Color.argb(70, 180, 220, 255)
-                canvas.drawCircle(sx, sy, rr * 1.2f, bodyPaint)
+                bodyPaint.color = Color.argb(60, 180, 220, 255)
+                canvas.drawCircle(sx, sy, rr * 1.18f, bodyPaint)
                 bodyPaint.color = body.color
                 canvas.drawCircle(sx, sy, rr, bodyPaint)
             }
@@ -411,46 +460,49 @@ class UniverseView(context: Context) : View(context) {
         linePaint.strokeWidth = 2f
 
         for (i in 1 until body.trail.size) {
-            val p1 = body.trail[i - 1]
-            val p2 = body.trail[i]
+            val p1 = project(body.trail[i - 1].first, body.trail[i - 1].second, body.z)
+            val p2 = project(body.trail[i].first, body.trail[i].second, body.z)
+
             canvas.drawLine(
-                cx + p1.first.toFloat() * scaleFactor,
-                cy + p1.second.toFloat() * scaleFactor,
-                cx + p2.first.toFloat() * scaleFactor,
-                cy + p2.second.toFloat() * scaleFactor,
+                cx + p1[0].toFloat(),
+                cy + p1[1].toFloat(),
+                cx + p2[0].toFloat(),
+                cy + p2[1].toFloat(),
                 linePaint
             )
         }
     }
 
     private fun drawHud(canvas: Canvas) {
-        canvas.drawRoundRect(18f, 18f, width - 18f, 435f, 18f, 18f, hudPaint)
+        canvas.drawRoundRect(18f, 18f, width - 18f, 470f, 18f, 18f, hudPaint)
 
         bodyPaint.color = Color.argb(180, 40, 40, 50)
-        canvas.drawRoundRect(minusButton, 12f, 12f, bodyPaint)
-        canvas.drawRoundRect(plusButton, 12f, 12f, bodyPaint)
-        canvas.drawRoundRect(modeButton, 12f, 12f, bodyPaint)
-        canvas.drawRoundRect(backButton, 12f, 12f, bodyPaint)
+        listOf(minusButton, plusButton, modeButton, backButton, yawMinusButton, yawPlusButton, pitchMinusButton, pitchPlusButton)
+            .forEach { canvas.drawRoundRect(it, 12f, 12f, bodyPaint) }
 
         canvas.drawText("-", 57f, 69f, textPaint)
         canvas.drawText("+", 151f, 69f, textPaint)
         canvas.drawText("MODE", 236f, 69f, smallTextPaint)
         canvas.drawText("BACK", 392f, 69f, smallTextPaint)
+        canvas.drawText("Y-", 544f, 69f, smallTextPaint)
+        canvas.drawText("Y+", 670f, 69f, smallTextPaint)
+        canvas.drawText("P-", 796f, 69f, smallTextPaint)
+        canvas.drawText("P+", 922f, 69f, smallTextPaint)
 
-        canvas.drawText("Time x" + String.format("%.2f", timeScale), 520f, 69f, textPaint)
-        canvas.drawText("Pinch zoom | Drag pan | Tap body to select/focus", 34f, 122f, smallTextPaint)
-        canvas.drawText("MODE enters local system view for selected body", 34f, 162f, smallTextPaint)
-        canvas.drawText("BACK exits local mode and clears focus if needed", 34f, 202f, smallTextPaint)
-        canvas.drawText("Scale: " + String.format("%.2f", scaleFactor), 34f, 242f, smallTextPaint)
-        canvas.drawText("Status: " + if (paused) "Paused" else "Running", 34f, 282f, smallTextPaint)
-        canvas.drawText("View: " + if (detailMode) "Detail mode" else "System mode", 34f, 322f, smallTextPaint)
+        canvas.drawText("Time x" + String.format("%.2f", timeScale), 34f, 124f, smallTextPaint)
+        canvas.drawText("Yaw " + String.format("%.2f", cameraYaw) + " | Pitch " + String.format("%.2f", cameraPitch), 34f, 164f, smallTextPaint)
+        canvas.drawText("Pinch zoom | Drag pan | Tap body to select/focus", 34f, 204f, smallTextPaint)
+        canvas.drawText("MODE = local system | BACK = return / clear focus", 34f, 244f, smallTextPaint)
+        canvas.drawText("Scale: " + String.format("%.2f", scaleFactor), 34f, 284f, smallTextPaint)
+        canvas.drawText("Status: " + if (paused) "Paused" else "Running", 34f, 324f, smallTextPaint)
+        canvas.drawText("View: " + if (detailMode) "Detail mode" else "System mode", 34f, 364f, smallTextPaint)
 
         val s = selectedBody
         if (s == null) {
-            canvas.drawText("Selected: none", 34f, 362f, smallTextPaint)
+            canvas.drawText("Selected: none", 34f, 404f, smallTextPaint)
         } else {
-            canvas.drawText("Selected: " + s.name + " | " + s.kind, 34f, 362f, smallTextPaint)
-            canvas.drawText("Mass: " + String.format("%.1f", s.mass) + " | Radius: " + String.format("%.1f", s.radius), 34f, 402f, smallTextPaint)
+            canvas.drawText("Selected: " + s.name + " | " + s.kind, 34f, 404f, smallTextPaint)
+            canvas.drawText("Mass: " + String.format("%.1f", s.mass) + " | Radius: " + String.format("%.1f", s.radius), 34f, 444f, smallTextPaint)
         }
     }
 
@@ -472,12 +524,13 @@ class UniverseView(context: Context) : View(context) {
         var bestDist = Float.MAX_VALUE
 
         for (b in allBodies()) {
-            val sx = cx + b.x.toFloat() * scaleFactor
-            val sy = cy + b.y.toFloat() * scaleFactor
+            val p = project(b.x, b.y, b.z)
+            val sx = cx + p[0].toFloat()
+            val sy = cy + p[1].toFloat()
             val dx = screenX - sx
             val dy = screenY - sy
             val d = sqrt(dx * dx + dy * dy)
-            val threshold = maxOf(26f, b.radius * scaleFactor + 18f)
+            val threshold = max(26f, b.radius * p[3].toFloat() * scaleFactor + 18f)
             if (d < threshold && d < bestDist) {
                 best = b
                 bestDist = d
@@ -518,7 +571,9 @@ class UniverseView(context: Context) : View(context) {
                         vy = speed,
                         mass = 20.0 + i * 10.0,
                         radius = (6 + i * 2).toFloat(),
-                        color = colors[i % colors.size]
+                        color = colors[i % colors.size],
+                        z = if (i % 2 == 0) 12.0 + i * 4 else -12.0 - i * 4,
+                        vz = if (i % 2 == 0) 10.0 else -10.0
                     )
                 )
             }
@@ -537,7 +592,9 @@ class UniverseView(context: Context) : View(context) {
                         vy = speed,
                         mass = 8.0 + i * 4.0,
                         radius = (4 + i).toFloat(),
-                        color = moonColors[i % moonColors.size]
+                        color = moonColors[i % moonColors.size],
+                        z = if (i % 2 == 0) 8.0 + i * 3 else -8.0 - i * 3,
+                        vz = if (i % 2 == 0) 8.0 else -8.0
                     )
                 )
             }
@@ -552,7 +609,9 @@ class UniverseView(context: Context) : View(context) {
                     vy = 200.0,
                     mass = 4.0,
                     radius = 4f,
-                    color = Color.WHITE
+                    color = Color.WHITE,
+                    z = 12.0,
+                    vz = 10.0
                 )
             )
         }
@@ -609,19 +668,37 @@ class UniverseView(context: Context) : View(context) {
                 }
 
                 if (modeButton.contains(x, y)) {
-                    if (selectedBody != null) {
-                        enterDetailMode()
-                    }
+                    if (selectedBody != null) enterDetailMode()
                     invalidate()
                     return true
                 }
 
                 if (backButton.contains(x, y)) {
-                    if (detailMode) {
-                        exitDetailMode()
-                    } else {
-                        selectedBody = null
-                    }
+                    if (detailMode) exitDetailMode() else selectedBody = null
+                    invalidate()
+                    return true
+                }
+
+                if (yawMinusButton.contains(x, y)) {
+                    cameraYaw -= 0.12
+                    invalidate()
+                    return true
+                }
+
+                if (yawPlusButton.contains(x, y)) {
+                    cameraYaw += 0.12
+                    invalidate()
+                    return true
+                }
+
+                if (pitchMinusButton.contains(x, y)) {
+                    cameraPitch = (cameraPitch - 0.08).coerceAtLeast(-1.0)
+                    invalidate()
+                    return true
+                }
+
+                if (pitchPlusButton.contains(x, y)) {
+                    cameraPitch = (cameraPitch + 0.08).coerceAtMost(1.0)
                     invalidate()
                     return true
                 }
@@ -629,9 +706,7 @@ class UniverseView(context: Context) : View(context) {
                 if (!isDragging && !scaleDetector.isInProgress) {
                     if (!detailMode) {
                         val hit = trySelectAt(x, y)
-                        if (!hit) {
-                            paused = !paused
-                        }
+                        if (!hit) paused = !paused
                     } else {
                         paused = !paused
                     }

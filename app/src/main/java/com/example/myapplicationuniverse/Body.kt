@@ -10,5 +10,7 @@ data class Body(
     val mass: Double,
     val radius: Float,
     val color: Int,
-    val trail: MutableList<Pair<Double, Double>> = mutableListOf()
+    val trail: MutableList<Pair<Double, Double>> = mutableListOf(),
+    var z: Double = 0.0,
+    var vz: Double = 0.0
 )
