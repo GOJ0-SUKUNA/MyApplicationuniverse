@@ -12,7 +12,6 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
     private val renderer: StarfieldRenderer
     private var lastX = 0f
     private var lastY = 0f
-    private var dragging = false
     private var statusListener: ((String) -> Unit)? = null
 
     private val scaleDetector: ScaleGestureDetector
@@ -33,7 +32,7 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
             object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
                     renderer.cameraDistance /= detector.scaleFactor
-                    renderer.cameraDistance = renderer.cameraDistance.coerceIn(2.2f, 55f)
+                    renderer.cameraDistance = renderer.cameraDistance.coerceIn(2.0f, 60f)
                     return true
                 }
             }
@@ -55,13 +54,19 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
                     }
                     return true
                 }
+
+                override fun onLongPress(e: MotionEvent) {
+                    queueEvent {
+                        renderer.toggleExoticMode()
+                    }
+                }
             }
         )
     }
 
     fun setStatusListener(listener: (String) -> Unit) {
         statusListener = listener
-        listener("Drag: rotate | Pinch: zoom | Tap: select | Double tap: enter/exit system")
+        listener("Drag rotate | Pinch zoom | Tap select | Double tap local mode | Long press exotic mode")
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -72,7 +77,6 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
             MotionEvent.ACTION_DOWN -> {
                 lastX = event.x
                 lastY = event.y
-                dragging = false
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -80,11 +84,11 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
                     val dx = event.x - lastX
                     val dy = event.y - lastY
 
-                    if (abs(dx) > 2f || abs(dy) > 2f) dragging = true
-
-                    renderer.yaw += dx * 0.005f
-                    renderer.pitch += dy * 0.005f
-                    renderer.pitch = renderer.pitch.coerceIn(-1.2f, 1.2f)
+                    if (abs(dx) > 1f || abs(dy) > 1f) {
+                        renderer.yaw += dx * 0.005f
+                        renderer.pitch += dy * 0.005f
+                        renderer.pitch = renderer.pitch.coerceIn(-1.2f, 1.2f)
+                    }
 
                     lastX = event.x
                     lastY = event.y
