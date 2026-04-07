@@ -18,14 +18,48 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
     private val scaleDetector: ScaleGestureDetector
     private val gestureDetector: GestureDetector
 
+    @Volatile
+    private var latestObjectInfo = "No object selected"
+
+    @Volatile
+    private var latestLiveSummary = "Live data pending..."
+
+    @Volatile
+    private var latestLiveShort = "Live: pending"
+
+    @Volatile
+    private var refreshInFlight = false
+
+    @Volatile
+    private var lastRefreshMs = 0L
+
+    private val refreshIntervalMs = 15L * 60L * 1000L
+
+    private val refreshRunnable = object : Runnable {
+        override fun run() {
+            val now = System.currentTimeMillis()
+            if (!refreshInFlight && now - lastRefreshMs >= refreshIntervalMs) {
+                refreshLiveData()
+            }
+            postDelayed(this, refreshIntervalMs)
+        }
+    }
+
     init {
         setEGLContextClientVersion(2)
         renderer = StarfieldRenderer()
+
         renderer.statusCallback = { msg ->
-            post { statusListener?.invoke(msg) }
+            post {
+                statusListener?.invoke(msg + " | " + latestLiveShort)
+            }
         }
+
         renderer.infoCallback = { msg ->
-            post { infoListener?.invoke(msg) }
+            latestObjectInfo = msg
+            post {
+                infoListener?.invoke(combinedInfo())
+            }
         }
 
         setRenderer(renderer)
@@ -66,16 +100,72 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
                 }
             }
         )
+
+        refreshLiveData()
+        postDelayed(refreshRunnable, refreshIntervalMs)
+    }
+
+    private fun combinedInfo(): String {
+        return latestObjectInfo + "\n\nLive data:\n" + latestLiveSummary
+    }
+
+    private fun refreshLiveData() {
+        if (refreshInFlight) return
+        refreshInFlight = true
+        latestLiveShort = "Live: refreshing..."
+
+        statusListener?.invoke("Refreshing live space data...")
+
+        Thread {
+            val summary = LiveSpaceRepository.fetchLiveSummary()
+            lastRefreshMs = System.currentTimeMillis()
+            refreshInFlight = false
+
+            val stationPreview = if (summary.stationNames.isEmpty()) {
+                "none"
+            } else {
+                summary.stationNames.joinToString(", ")
+            }
+
+            val neoPreview = if (summary.neoNames.isEmpty()) {
+                "none"
+            } else {
+                summary.neoNames.joinToString(", ")
+            }
+
+            latestLiveSummary =
+                "Status: " + summary.status +
+                "\nCelesTrak stations: " + summary.stationsCount +
+                "\nSample stations: " + stationPreview +
+                "\nNASA NEOs today: " + summary.neoCount +
+                "\nHazardous today: " + summary.hazardousCount +
+                "\nSample NEOs: " + neoPreview
+
+            latestLiveShort =
+                "Live: stations " + summary.stationsCount +
+                " | NEOs " + summary.neoCount +
+                " | hazardous " + summary.hazardousCount
+
+            post {
+                statusListener?.invoke("Live space data updated | " + latestLiveShort)
+                infoListener?.invoke(combinedInfo())
+            }
+        }.start()
     }
 
     fun setStatusListener(listener: (String) -> Unit) {
         statusListener = listener
-        listener("Drag rotate | Pinch zoom | Tap select | Double tap local mode | Long press exotic mode")
+        listener("Drag rotate | Pinch zoom | Tap select | Double tap local mode | Long press exotic mode | " + latestLiveShort)
     }
 
     fun setInfoListener(listener: (String) -> Unit) {
         infoListener = listener
-        listener("No object selected")
+        listener(combinedInfo())
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(refreshRunnable)
+        super.onDetachedFromWindow()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
