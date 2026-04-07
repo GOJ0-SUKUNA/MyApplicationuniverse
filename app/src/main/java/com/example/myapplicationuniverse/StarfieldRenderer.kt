@@ -63,12 +63,22 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     private lateinit var nebulaColorBuffer: FloatBuffer
     private var nebulaCount = 0
 
-    private var program = 0
-    private var positionHandle = 0
-    private var colorHandle = 0
-    private var mvpHandle = 0
+    private lateinit var sphereMesh: SphereMesh
+
+    private var pointProgram = 0
+    private var pointPositionHandle = 0
+    private var pointColorHandle = 0
+    private var pointMvpHandle = 0
     private var pointSizeHandle = 0
-    private var timeHandle = 0
+    private var pointTimeHandle = 0
+
+    private var meshProgram = 0
+    private var meshPositionHandle = 0
+    private var meshNormalHandle = 0
+    private var meshModelHandle = 0
+    private var meshMvpHandle = 0
+    private var meshColorHandle = 0
+    private var meshLightHandle = 0
 
     private var widthPx = 1
     private var heightPx = 1
@@ -79,6 +89,9 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     private val temp = FloatArray(16)
     private val mvp = FloatArray(16)
     private val currentMvp = FloatArray(16)
+    private val modelLocal = FloatArray(16)
+    private val tempLocal = FloatArray(16)
+    private val mvpLocal = FloatArray(16)
 
     private var angle = 0f
     private var mode = 0
@@ -93,18 +106,28 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0f, 0f, 0.02f, 1f)
         GLES20.glEnable(GLES20.GL_BLEND)
-        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthFunc(GLES20.GL_LEQUAL)
 
         buildUniverse(24000)
         buildNebula(2600)
+        sphereMesh = SphereMesh()
 
-        program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
-        positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
-        colorHandle = GLES20.glGetAttribLocation(program, "aColor")
-        mvpHandle = GLES20.glGetUniformLocation(program, "uMVP")
-        pointSizeHandle = GLES20.glGetUniformLocation(program, "uPointSize")
-        timeHandle = GLES20.glGetUniformLocation(program, "uTime")
+        pointProgram = createProgram(POINT_VERTEX_SHADER, POINT_FRAGMENT_SHADER)
+        pointPositionHandle = GLES20.glGetAttribLocation(pointProgram, "aPosition")
+        pointColorHandle = GLES20.glGetAttribLocation(pointProgram, "aColor")
+        pointMvpHandle = GLES20.glGetUniformLocation(pointProgram, "uMVP")
+        pointSizeHandle = GLES20.glGetUniformLocation(pointProgram, "uPointSize")
+        pointTimeHandle = GLES20.glGetUniformLocation(pointProgram, "uTime")
+
+        meshProgram = createProgram(MESH_VERTEX_SHADER, MESH_FRAGMENT_SHADER)
+        meshPositionHandle = GLES20.glGetAttribLocation(meshProgram, "aPosition")
+        meshNormalHandle = GLES20.glGetAttribLocation(meshProgram, "aNormal")
+        meshModelHandle = GLES20.glGetUniformLocation(meshProgram, "uModel")
+        meshMvpHandle = GLES20.glGetUniformLocation(meshProgram, "uMVP")
+        meshColorHandle = GLES20.glGetUniformLocation(meshProgram, "uColor")
+        meshLightHandle = GLES20.glGetUniformLocation(meshProgram, "uLightDir")
 
         Matrix.setIdentityM(model, 0)
     }
@@ -118,7 +141,7 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         angle += 0.002f
 
         val camX = (sin(yaw.toDouble()) * cos(pitch.toDouble()) * cameraDistance).toFloat()
@@ -131,9 +154,6 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             0f, 0f, 0f,
             0f, 1f, 0f
         )
-
-        GLES20.glUseProgram(program)
-        GLES20.glUniform1f(timeHandle, angle)
 
         if (mode == 0) {
             Matrix.setIdentityM(model, 0)
@@ -151,24 +171,23 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                 drawSinglePoint(s.x, s.y, s.z, floatArrayOf(1f, 1f, 1f, 0.5f), 28f, mvp)
             }
         } else {
+            Matrix.setIdentityM(model, 0)
+            Matrix.multiplyMM(temp, 0, view, 0, model, 0)
+            Matrix.multiplyMM(mvp, 0, projection, 0, temp, 0)
+            System.arraycopy(mvp, 0, currentMvp, 0, 16)
             drawLocalSystem()
         }
     }
 
     private fun drawLocalSystem() {
-        Matrix.setIdentityM(model, 0)
-        Matrix.multiplyMM(temp, 0, view, 0, model, 0)
-        Matrix.multiplyMM(mvp, 0, projection, 0, temp, 0)
-        System.arraycopy(mvp, 0, currentMvp, 0, 16)
-
         if (!exoticMode) {
-            drawStarVisual(0f, 0f, 0f, localStarColor, mvp)
+            drawStarVisual(0f, 0f, 0f, localStarColor)
         } else {
-            drawBlackHoleSystem(mvp)
+            drawBlackHoleSystem()
         }
 
         if (selectedLocalIndex == -1) {
-            drawSelectionHalo(0f, 0f, 0f, 0.65f, mvp)
+            drawSelectionHalo(0f, 0f, 0f, 0.72f)
         }
 
         val orbitLinePositions = ArrayList<Float>()
@@ -180,11 +199,11 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             val py = p[1]
             val pz = p[2]
 
-            drawOrbitBody(px, py, pz, b, mvp, selectedLocalIndex == i)
+            drawOrbitBody(px, py, pz, b, selectedLocalIndex == i)
 
             repeat(b.moonCount) { mi ->
                 val moonP = localMoonPosition(px, py, pz, i, mi)
-                drawMoonVisual(moonP[0], moonP[1], moonP[2], mvp)
+                drawMoonVisual(moonP[0], moonP[1], moonP[2])
             }
 
             val segments = 72
@@ -214,17 +233,16 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         }
     }
 
-    private fun drawStarVisual(x: Float, y: Float, z: Float, color: FloatArray, mvpMatrix: FloatArray) {
-        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.22f), 74f, mvpMatrix)
-        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.42f), 50f, mvpMatrix)
-        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.75f), 30f, mvpMatrix)
-        drawSinglePoint(x, y, z, color, 18f, mvpMatrix)
+    private fun drawStarVisual(x: Float, y: Float, z: Float, color: FloatArray) {
+        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.22f), 74f, mvp)
+        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.42f), 50f, mvp)
+        drawSinglePoint(x, y, z, floatArrayOf(color[0], color[1], color[2], 0.75f), 30f, mvp)
+        drawMeshSphere(x, y, z, 0.42f, floatArrayOf(color[0], color[1], color[2], 1f))
     }
 
-    private fun drawMoonVisual(x: Float, y: Float, z: Float, mvpMatrix: FloatArray) {
-        drawSinglePoint(x, y, z, floatArrayOf(0.22f, 0.22f, 0.26f, 1f), 8f, mvpMatrix)
-        drawSinglePoint(x, y, z, floatArrayOf(0.84f, 0.86f, 0.92f, 1f), 5f, mvpMatrix)
-        drawWireSphere(x, y, z, 0.11f, floatArrayOf(0.65f, 0.68f, 0.75f, 1f), mvpMatrix, 20)
+    private fun drawMoonVisual(x: Float, y: Float, z: Float) {
+        drawSinglePoint(x, y, z, floatArrayOf(0.84f, 0.86f, 0.92f, 0.18f), 9f, mvp)
+        drawMeshSphere(x, y, z, 0.11f, floatArrayOf(0.84f, 0.86f, 0.92f, 1f))
     }
 
     private fun drawOrbitBody(
@@ -232,37 +250,66 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         y: Float,
         z: Float,
         body: OrbitBody,
-        mvpMatrix: FloatArray,
         selected: Boolean
     ) {
-        if (body.atmosphere) {
-            drawSinglePoint(x, y, z, floatArrayOf(body.color[0], body.color[1], body.color[2], 0.18f), body.size * 2.1f, mvpMatrix)
-        }
-
-        drawSinglePoint(x, y, z, floatArrayOf(body.color[0] * 0.28f, body.color[1] * 0.28f, body.color[2] * 0.28f, 1f), body.size * 1.15f, mvpMatrix)
-        drawSinglePoint(x, y, z, body.color, body.size, mvpMatrix)
-
         val sphereRadius = when {
             body.kind.contains("Gas", ignoreCase = true) -> body.size * 0.028f
             else -> body.size * 0.022f
         }
 
-        drawWireSphere(x, y, z, sphereRadius, floatArrayOf(body.color[0], body.color[1], body.color[2], 0.95f), mvpMatrix, 24)
-
         if (body.atmosphere) {
-            drawWireSphere(x, y, z, sphereRadius * 1.22f, floatArrayOf(body.color[0], body.color[1], body.color[2], 0.45f), mvpMatrix, 24)
+            drawMeshSphere(
+                x, y, z,
+                sphereRadius * 1.18f,
+                floatArrayOf(body.color[0], body.color[1], body.color[2], 0.22f)
+            )
         }
 
+        drawMeshSphere(x, y, z, sphereRadius, floatArrayOf(body.color[0], body.color[1], body.color[2], 1f))
+
         if (body.ringed) {
-            drawPlanetRing(x, y, z, sphereRadius * 1.9f, mvpMatrix)
+            drawPlanetRing(x, y, z, sphereRadius * 1.9f)
         }
 
         if (selected) {
-            drawSelectionHalo(x, y, z, sphereRadius * 2.3f, mvpMatrix)
+            drawSelectionHalo(x, y, z, sphereRadius * 2.3f)
         }
     }
 
-    private fun drawSelectionHalo(x: Float, y: Float, z: Float, radius: Float, mvpMatrix: FloatArray) {
+    private fun drawMeshSphere(
+        x: Float,
+        y: Float,
+        z: Float,
+        radius: Float,
+        color: FloatArray
+    ) {
+        GLES20.glUseProgram(meshProgram)
+
+        Matrix.setIdentityM(modelLocal, 0)
+        Matrix.translateM(modelLocal, 0, x, y, z)
+        Matrix.scaleM(modelLocal, 0, radius, radius, radius)
+
+        Matrix.multiplyMM(tempLocal, 0, view, 0, modelLocal, 0)
+        Matrix.multiplyMM(mvpLocal, 0, projection, 0, tempLocal, 0)
+
+        GLES20.glUniformMatrix4fv(meshModelHandle, 1, false, modelLocal, 0)
+        GLES20.glUniformMatrix4fv(meshMvpHandle, 1, false, mvpLocal, 0)
+        GLES20.glUniform4f(meshColorHandle, color[0], color[1], color[2], color[3])
+        GLES20.glUniform3f(meshLightHandle, 0.4f, 0.8f, 0.6f)
+
+        GLES20.glEnableVertexAttribArray(meshPositionHandle)
+        GLES20.glVertexAttribPointer(meshPositionHandle, 3, GLES20.GL_FLOAT, false, 0, sphereMesh.positionBuffer)
+
+        GLES20.glEnableVertexAttribArray(meshNormalHandle)
+        GLES20.glVertexAttribPointer(meshNormalHandle, 3, GLES20.GL_FLOAT, false, 0, sphereMesh.normalBuffer)
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, sphereMesh.vertexCount)
+
+        GLES20.glDisableVertexAttribArray(meshPositionHandle)
+        GLES20.glDisableVertexAttribArray(meshNormalHandle)
+    }
+
+    private fun drawSelectionHalo(x: Float, y: Float, z: Float, radius: Float) {
         val positions = ArrayList<Float>()
         val colors = ArrayList<Float>()
         val segments = 40
@@ -283,91 +330,11 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             floatBufferOf(positions.toFloatArray()),
             floatBufferOf(colors.toFloatArray()),
             positions.size / 3,
-            mvpMatrix
+            mvp
         )
     }
 
-    private fun drawWireSphere(
-        cx: Float,
-        cy: Float,
-        cz: Float,
-        radius: Float,
-        color: FloatArray,
-        mvpMatrix: FloatArray,
-        segments: Int
-    ) {
-        drawCircleXZ(cx, cy, cz, radius, color, mvpMatrix, segments)
-        drawCircleXY(cx, cy, cz, radius, color, mvpMatrix, segments)
-        drawCircleYZ(cx, cy, cz, radius, color, mvpMatrix, segments)
-    }
-
-    private fun drawCircleXZ(
-        cx: Float,
-        cy: Float,
-        cz: Float,
-        radius: Float,
-        color: FloatArray,
-        mvpMatrix: FloatArray,
-        segments: Int
-    ) {
-        val pos = ArrayList<Float>()
-        val col = ArrayList<Float>()
-        for (i in 0..segments) {
-            val t = (i.toFloat() / segments.toFloat()) * (PI.toFloat() * 2f)
-            pos.add(cx + cos(t.toDouble()).toFloat() * radius)
-            pos.add(cy)
-            pos.add(cz + sin(t.toDouble()).toFloat() * radius)
-
-            col.add(color[0]); col.add(color[1]); col.add(color[2]); col.add(color[3])
-        }
-        drawLines(floatBufferOf(pos.toFloatArray()), floatBufferOf(col.toFloatArray()), pos.size / 3, mvpMatrix)
-    }
-
-    private fun drawCircleXY(
-        cx: Float,
-        cy: Float,
-        cz: Float,
-        radius: Float,
-        color: FloatArray,
-        mvpMatrix: FloatArray,
-        segments: Int
-    ) {
-        val pos = ArrayList<Float>()
-        val col = ArrayList<Float>()
-        for (i in 0..segments) {
-            val t = (i.toFloat() / segments.toFloat()) * (PI.toFloat() * 2f)
-            pos.add(cx + cos(t.toDouble()).toFloat() * radius)
-            pos.add(cy + sin(t.toDouble()).toFloat() * radius)
-            pos.add(cz)
-
-            col.add(color[0]); col.add(color[1]); col.add(color[2]); col.add(color[3])
-        }
-        drawLines(floatBufferOf(pos.toFloatArray()), floatBufferOf(col.toFloatArray()), pos.size / 3, mvpMatrix)
-    }
-
-    private fun drawCircleYZ(
-        cx: Float,
-        cy: Float,
-        cz: Float,
-        radius: Float,
-        color: FloatArray,
-        mvpMatrix: FloatArray,
-        segments: Int
-    ) {
-        val pos = ArrayList<Float>()
-        val col = ArrayList<Float>()
-        for (i in 0..segments) {
-            val t = (i.toFloat() / segments.toFloat()) * (PI.toFloat() * 2f)
-            pos.add(cx)
-            pos.add(cy + cos(t.toDouble()).toFloat() * radius)
-            pos.add(cz + sin(t.toDouble()).toFloat() * radius)
-
-            col.add(color[0]); col.add(color[1]); col.add(color[2]); col.add(color[3])
-        }
-        drawLines(floatBufferOf(pos.toFloatArray()), floatBufferOf(col.toFloatArray()), pos.size / 3, mvpMatrix)
-    }
-
-    private fun drawPlanetRing(x: Float, y: Float, z: Float, radius: Float, mvpMatrix: FloatArray) {
+    private fun drawPlanetRing(x: Float, y: Float, z: Float, radius: Float) {
         val positions = ArrayList<Float>()
         val colors = ArrayList<Float>()
         val segments = 80
@@ -392,11 +359,11 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             floatBufferOf(positions.toFloatArray()),
             floatBufferOf(colors.toFloatArray()),
             positions.size / 3,
-            mvpMatrix
+            mvp
         )
     }
 
-    private fun drawBlackHoleSystem(mvpMatrix: FloatArray) {
+    private fun drawBlackHoleSystem() {
         val ringPositions = ArrayList<Float>()
         val ringColors = ArrayList<Float>()
 
@@ -421,11 +388,11 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             floatBufferOf(ringPositions.toFloatArray()),
             floatBufferOf(ringColors.toFloatArray()),
             ringPositions.size / 3,
-            mvpMatrix
+            mvp
         )
 
-        drawSinglePoint(0f, 0f, 0f, floatArrayOf(0.08f, 0.08f, 0.12f, 1f), 36f, mvpMatrix)
-        drawSinglePoint(0f, 0f, 0f, floatArrayOf(0.35f, 0.45f, 0.95f, 0.55f), 54f, mvpMatrix)
+        drawMeshSphere(0f, 0f, 0f, 0.25f, floatArrayOf(0.08f, 0.08f, 0.12f, 1f))
+        drawSinglePoint(0f, 0f, 0f, floatArrayOf(0.35f, 0.45f, 0.95f, 0.55f), 54f, mvp)
     }
 
     private fun buildUniverse(count: Int) {
@@ -858,19 +825,22 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         pointSize: Float,
         mvpMatrix: FloatArray
     ) {
-        GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrix, 0)
+        GLES20.glUseProgram(pointProgram)
+
+        GLES20.glUniformMatrix4fv(pointMvpHandle, 1, false, mvpMatrix, 0)
         GLES20.glUniform1f(pointSizeHandle, pointSize)
+        GLES20.glUniform1f(pointTimeHandle, angle)
 
-        GLES20.glEnableVertexAttribArray(positionHandle)
-        GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, positions)
+        GLES20.glEnableVertexAttribArray(pointPositionHandle)
+        GLES20.glVertexAttribPointer(pointPositionHandle, 3, GLES20.GL_FLOAT, false, 0, positions)
 
-        GLES20.glEnableVertexAttribArray(colorHandle)
-        GLES20.glVertexAttribPointer(colorHandle, 4, GLES20.GL_FLOAT, false, 0, colors)
+        GLES20.glEnableVertexAttribArray(pointColorHandle)
+        GLES20.glVertexAttribPointer(pointColorHandle, 4, GLES20.GL_FLOAT, false, 0, colors)
 
         GLES20.glDrawArrays(GLES20.GL_POINTS, 0, count)
 
-        GLES20.glDisableVertexAttribArray(positionHandle)
-        GLES20.glDisableVertexAttribArray(colorHandle)
+        GLES20.glDisableVertexAttribArray(pointPositionHandle)
+        GLES20.glDisableVertexAttribArray(pointColorHandle)
     }
 
     private fun drawSinglePoint(
@@ -892,19 +862,22 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         count: Int,
         mvpMatrix: FloatArray
     ) {
-        GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrix, 0)
+        GLES20.glUseProgram(pointProgram)
+
+        GLES20.glUniformMatrix4fv(pointMvpHandle, 1, false, mvpMatrix, 0)
         GLES20.glUniform1f(pointSizeHandle, 1f)
+        GLES20.glUniform1f(pointTimeHandle, angle)
 
-        GLES20.glEnableVertexAttribArray(positionHandle)
-        GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, positions)
+        GLES20.glEnableVertexAttribArray(pointPositionHandle)
+        GLES20.glVertexAttribPointer(pointPositionHandle, 3, GLES20.GL_FLOAT, false, 0, positions)
 
-        GLES20.glEnableVertexAttribArray(colorHandle)
-        GLES20.glVertexAttribPointer(colorHandle, 4, GLES20.GL_FLOAT, false, 0, colors)
+        GLES20.glEnableVertexAttribArray(pointColorHandle)
+        GLES20.glVertexAttribPointer(pointColorHandle, 4, GLES20.GL_FLOAT, false, 0, colors)
 
         GLES20.glDrawArrays(GLES20.GL_LINE_STRIP, 0, count)
 
-        GLES20.glDisableVertexAttribArray(positionHandle)
-        GLES20.glDisableVertexAttribArray(colorHandle)
+        GLES20.glDisableVertexAttribArray(pointPositionHandle)
+        GLES20.glDisableVertexAttribArray(pointColorHandle)
     }
 
     private fun floatBufferOf(values: FloatArray): FloatBuffer {
@@ -936,7 +909,7 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     }
 
     companion object {
-        private const val VERTEX_SHADER = """
+        private const val POINT_VERTEX_SHADER = """
             attribute vec3 aPosition;
             attribute vec4 aColor;
             uniform mat4 uMVP;
@@ -951,7 +924,7 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             }
         """
 
-        private const val FRAGMENT_SHADER = """
+        private const val POINT_FRAGMENT_SHADER = """
             precision mediump float;
             varying vec4 vColor;
             uniform float uTime;
@@ -963,6 +936,33 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                 float glow = 1.0 - smoothstep(0.0, 0.5, d);
                 float shimmer = 0.94 + 0.06 * sin(uTime * 8.0 + d * 18.0);
                 gl_FragColor = vec4(vColor.rgb * (0.55 + glow * 1.45) * shimmer, glow * vColor.a);
+            }
+        """
+
+        private const val MESH_VERTEX_SHADER = """
+            attribute vec3 aPosition;
+            attribute vec3 aNormal;
+            uniform mat4 uModel;
+            uniform mat4 uMVP;
+            varying vec3 vNormal;
+
+            void main() {
+                vNormal = mat3(uModel) * aNormal;
+                gl_Position = uMVP * vec4(aPosition, 1.0);
+            }
+        """
+
+        private const val MESH_FRAGMENT_SHADER = """
+            precision mediump float;
+            varying vec3 vNormal;
+            uniform vec4 uColor;
+            uniform vec3 uLightDir;
+
+            void main() {
+                vec3 n = normalize(vNormal);
+                float diff = max(0.18, dot(normalize(n), normalize(uLightDir)));
+                vec3 col = uColor.rgb * (0.35 + 0.65 * diff);
+                gl_FragColor = vec4(col, uColor.a);
             }
         """
     }
