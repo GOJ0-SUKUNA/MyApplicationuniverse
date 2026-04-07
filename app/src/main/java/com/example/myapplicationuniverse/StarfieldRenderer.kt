@@ -24,7 +24,9 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         val b: Float,
         val size: Float,
         val name: String,
-        val kind: String
+        val kind: String,
+        val tempKelvin: Int,
+        val galaxyId: Int
     )
 
     data class OrbitBody(
@@ -34,7 +36,8 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
         val size: Float,
         val color: FloatArray,
         val tilt: Float,
-        val kind: String
+        val kind: String,
+        val description: String
     )
 
     var yaw = 0.35f
@@ -42,9 +45,11 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     var cameraDistance = 12f
 
     var statusCallback: ((String) -> Unit)? = null
+    var infoCallback: ((String) -> Unit)? = null
 
     private val stars = mutableListOf<Star>()
     private var selectedStarIndex = -1
+    private var selectedLocalIndex = -2 // -2 none, -1 center star, >=0 orbit body
 
     private lateinit var starBuffer: FloatBuffer
     private lateinit var colorBuffer: FloatBuffer
@@ -77,6 +82,9 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
 
     private val systemBodies = mutableListOf<OrbitBody>()
     private var localStarColor = floatArrayOf(1.0f, 0.9f, 0.5f, 1.0f)
+    private var localStarName = "Selected Star"
+    private var localStarType = "Yellow star"
+    private var localStarTemp = 5800
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0f, 0f, 0.02f, 1f)
@@ -155,8 +163,16 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             drawBlackHoleSystem(mvp)
         }
 
+        if (selectedLocalIndex == -1) {
+            drawSinglePoint(0f, 0f, 0f, floatArrayOf(1f, 1f, 1f, 1f), 54f, mvp)
+        }
+
         val orbitLinePositions = ArrayList<Float>()
         val orbitLineColors = ArrayList<Float>()
+        val localPositions = ArrayList<Float>()
+        val localColors = ArrayList<Float>()
+        val selectedPositions = ArrayList<Float>()
+        val selectedColors = ArrayList<Float>()
 
         for ((i, b) in systemBodies.withIndex()) {
             val a = angle * b.speed + i * 1.15f
@@ -164,7 +180,25 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             val py = sin((a * 0.35f).toDouble()).toFloat() * b.tilt
             val pz = sin(a.toDouble()).toFloat() * b.radius
 
-            drawSinglePoint(px, py, pz, b.color, b.size, mvp)
+            localPositions.add(px)
+            localPositions.add(py)
+            localPositions.add(pz)
+
+            localColors.add(b.color[0])
+            localColors.add(b.color[1])
+            localColors.add(b.color[2])
+            localColors.add(1f)
+
+            if (selectedLocalIndex == i) {
+                selectedPositions.add(px)
+                selectedPositions.add(py)
+                selectedPositions.add(pz)
+
+                selectedColors.add(1f)
+                selectedColors.add(1f)
+                selectedColors.add(1f)
+                selectedColors.add(1f)
+            }
 
             if (b.kind == "Planet") {
                 val moonAngle = angle * (b.speed * 2.4f) + i * 0.65f
@@ -196,6 +230,26 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                 floatBufferOf(orbitLinePositions.toFloatArray()),
                 floatBufferOf(orbitLineColors.toFloatArray()),
                 orbitLinePositions.size / 3,
+                mvp
+            )
+        }
+
+        if (localPositions.isNotEmpty()) {
+            drawPoints(
+                floatBufferOf(localPositions.toFloatArray()),
+                floatBufferOf(localColors.toFloatArray()),
+                localPositions.size / 3,
+                10f,
+                mvp
+            )
+        }
+
+        if (selectedPositions.isNotEmpty()) {
+            drawPoints(
+                floatBufferOf(selectedPositions.toFloatArray()),
+                floatBufferOf(selectedColors.toFloatArray()),
+                selectedPositions.size / 3,
+                18f,
                 mvp
             )
         }
@@ -257,19 +311,24 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
 
                 val typeRoll = Random.nextFloat()
                 val kind: String
+                val tempKelvin: Int
                 val rgb: FloatArray
 
                 if (typeRoll < 0.1f) {
                     kind = "Blue giant"
+                    tempKelvin = 12000
                     rgb = floatArrayOf(0.7f, 0.8f, 1.0f)
                 } else if (typeRoll < 0.35f) {
                     kind = "White star"
+                    tempKelvin = 9000
                     rgb = floatArrayOf(1.0f, 1.0f, 1.0f)
                 } else if (typeRoll < 0.78f) {
                     kind = "Yellow star"
+                    tempKelvin = 5800
                     rgb = floatArrayOf(1.0f, 0.9f, 0.65f)
                 } else {
                     kind = "Red giant"
+                    tempKelvin = 3500
                     rgb = floatArrayOf(1.0f, 0.65f, 0.55f)
                 }
 
@@ -285,7 +344,9 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                         b = rgb[2] * brightness,
                         size = 2.5f + Random.nextFloat() * 2.5f,
                         name = "Star-" + gi + "-" + i,
-                        kind = kind
+                        kind = kind,
+                        tempKelvin = tempKelvin,
+                        galaxyId = gi
                     )
                 )
             }
@@ -353,8 +414,14 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
     }
 
     fun pickAt(screenX: Float, screenY: Float) {
-        if (mode != 0) return
+        if (mode == 0) {
+            pickGalaxyStar(screenX, screenY)
+        } else {
+            pickLocalBody(screenX, screenY)
+        }
+    }
 
+    private fun pickGalaxyStar(screenX: Float, screenY: Float) {
         var best = -1
         var bestDist = Float.MAX_VALUE
 
@@ -391,13 +458,95 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             selectedStarIndex = best
             val s = stars[best]
             localStarColor = floatArrayOf(s.r, s.g, s.b, 1f)
+            localStarName = s.name
+            localStarType = s.kind
+            localStarTemp = s.tempKelvin
+
             statusCallback?.invoke(
-                "Selected " + s.name + " | " + s.kind +
-                    " | double tap local mode | long press exotic mode"
+                "Selected " + s.name + " | " + s.kind + " | double tap local mode | long press exotic mode"
+            )
+            infoCallback?.invoke(
+                "Name: " + s.name +
+                    "\nType: " + s.kind +
+                    "\nTemperature: " + s.tempKelvin + " K" +
+                    "\nGalaxy cluster: " + s.galaxyId +
+                    "\nPosition: (" +
+                    String.format("%.2f", s.x) + ", " +
+                    String.format("%.2f", s.y) + ", " +
+                    String.format("%.2f", s.z) + ")"
             )
         } else {
             statusCallback?.invoke("No star selected")
         }
+    }
+
+    private fun pickLocalBody(screenX: Float, screenY: Float) {
+        var best = -2
+        var bestDist = Float.MAX_VALUE
+
+        run {
+            val center = projectToScreen(0f, 0f, 0f)
+            val dx = screenX - center[0]
+            val dy = screenY - center[1]
+            val d = sqrt(dx * dx + dy * dy)
+            if (d < 55f) {
+                best = -1
+                bestDist = d
+            }
+        }
+
+        for ((i, b) in systemBodies.withIndex()) {
+            val p = localBodyPosition(i, b)
+            val s = projectToScreen(p[0], p[1], p[2])
+            val dx = screenX - s[0]
+            val dy = screenY - s[1]
+            val d = sqrt(dx * dx + dy * dy)
+            if (d < 35f && d < bestDist) {
+                best = i
+                bestDist = d
+            }
+        }
+
+        selectedLocalIndex = best
+
+        if (best == -1) {
+            statusCallback?.invoke("Selected local star")
+            infoCallback?.invoke(
+                "Name: " + localStarName +
+                    "\nType: " + if (exoticMode) "Exotic singularity mode" else localStarType +
+                    "\nTemperature: " + localStarTemp + " K" +
+                    "\nLocal bodies: " + systemBodies.size +
+                    "\nMode: " + if (exoticMode) "Accretion disk / black-hole style" else "Standard star system"
+            )
+        } else if (best >= 0 && best < systemBodies.size) {
+            val b = systemBodies[best]
+            statusCallback?.invoke("Selected " + b.name + " | " + b.kind)
+            infoCallback?.invoke(
+                "Name: " + b.name +
+                    "\nKind: " + b.kind +
+                    "\nOrbit radius: " + String.format("%.2f", b.radius) +
+                    "\nOrbit speed factor: " + String.format("%.2f", b.speed) +
+                    "\nSize: " + String.format("%.1f", b.size) +
+                    "\nNote: " + b.description
+            )
+        } else {
+            statusCallback?.invoke("No local body selected")
+        }
+    }
+
+    private fun projectToScreen(x: Float, y: Float, z: Float): FloatArray {
+        val vec = floatArrayOf(x, y, z, 1f)
+        val out = FloatArray(4)
+        Matrix.multiplyMV(out, 0, currentMvp, 0, vec, 0)
+
+        if (out[3] == 0f) return floatArrayOf(-9999f, -9999f)
+
+        val ndcX = out[0] / out[3]
+        val ndcY = out[1] / out[3]
+
+        val sx = (ndcX * 0.5f + 0.5f) * widthPx
+        val sy = (1f - (ndcY * 0.5f + 0.5f)) * heightPx
+        return floatArrayOf(sx, sy)
     }
 
     fun toggleSystemMode() {
@@ -408,18 +557,29 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             }
             buildSystemForSelectedStar()
             mode = 1
+            selectedLocalIndex = -1
             cameraDistance = 7.5f
             yaw = 0.35f
             pitch = 0.18f
+
+            infoCallback?.invoke(
+                "Name: " + localStarName +
+                    "\nType: " + if (exoticMode) "Exotic singularity mode" else localStarType +
+                    "\nTemperature: " + localStarTemp + " K" +
+                    "\nLocal bodies: " + systemBodies.size +
+                    "\nMode: " + if (exoticMode) "Accretion disk / black-hole style" else "Standard star system"
+            )
+
             statusCallback?.invoke(
                 if (exoticMode) {
-                    "Exotic local mode | drag rotate | pinch zoom | double tap to return"
+                    "Exotic local mode | tap bodies for info | double tap to return"
                 } else {
-                    "Local system mode | drag rotate | pinch zoom | double tap to return"
+                    "Local system mode | tap bodies for info | double tap to return"
                 }
             )
         } else {
             mode = 0
+            selectedLocalIndex = -2
             cameraDistance = 12f
             statusCallback?.invoke(
                 if (selectedStarIndex >= 0) {
@@ -453,6 +613,14 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             floatArrayOf(0.75f, 0.65f, 1.0f, 1f)
         )
 
+        val descs = listOf(
+            "Inner rocky world",
+            "Temperate atmosphere candidate",
+            "Dense volcanic body",
+            "Ringed gas giant analogue",
+            "Outer ice giant analogue"
+        )
+
         for (i in 0 until 5) {
             systemBodies.add(
                 OrbitBody(
@@ -462,10 +630,19 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
                     size = 7f + i,
                     color = colors[i % colors.size],
                     tilt = (if (i % 2 == 0) 0.12f else -0.12f) * (i + 1),
-                    kind = "Planet"
+                    kind = if (i < 3) "Planet" else "Gas giant",
+                    description = descs[i % descs.size]
                 )
             )
         }
+    }
+
+    private fun localBodyPosition(index: Int, b: OrbitBody): FloatArray {
+        val a = angle * b.speed + index * 1.15f
+        val px = cos(a.toDouble()).toFloat() * b.radius
+        val py = sin((a * 0.35f).toDouble()).toFloat() * b.tilt
+        val pz = sin(a.toDouble()).toFloat() * b.radius
+        return floatArrayOf(px, py, pz)
     }
 
     private fun drawPoints(
@@ -559,28 +736,24 @@ class StarfieldRenderer : GLSurfaceView.Renderer {
             uniform mat4 uMVP;
             uniform float uPointSize;
             varying vec4 vColor;
-            varying float vSize;
             uniform float uTime;
 
             void main() {
                 gl_Position = uMVP * vec4(aPosition, 1.0);
                 gl_PointSize = uPointSize;
                 vColor = aColor;
-                vSize = uPointSize;
             }
         """
 
         private const val FRAGMENT_SHADER = """
             precision mediump float;
             varying vec4 vColor;
-            varying float vSize;
             uniform float uTime;
 
             void main() {
                 vec2 c = gl_PointCoord - vec2(0.5);
                 float d = length(c);
                 if (d > 0.5) discard;
-
                 float glow = 1.0 - smoothstep(0.0, 0.5, d);
                 float shimmer = 0.94 + 0.06 * sin(uTime * 8.0 + d * 18.0);
                 gl_FragColor = vec4(vColor.rgb * (0.55 + glow * 1.45) * shimmer, glow * vColor.a);

@@ -14,7 +14,7 @@ class MainActivity : Activity() {
         val root = FrameLayout(this)
         val glView = GLUniverseView(this)
 
-        val hud = TextView(this).apply {
+        val statusHud = TextView(this).apply {
             text = "Loading universe..."
             setTextColor(Color.WHITE)
             textSize = 14f
@@ -22,21 +22,44 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.argb(120, 10, 10, 18))
         }
 
+        val infoHud = TextView(this).apply {
+            text = "No object selected"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setPadding(24, 24, 24, 24)
+            setBackgroundColor(Color.argb(150, 8, 12, 20))
+        }
+
         glView.setStatusListener { msg ->
             runOnUiThread {
-                hud.text = msg
+                statusHud.text = msg
+            }
+        }
+
+        glView.setInfoListener { msg ->
+            runOnUiThread {
+                infoHud.text = msg
             }
         }
 
         root.addView(glView)
+
         root.addView(
-            hud,
+            statusHud,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP
             )
         )
+
+        val infoParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM
+        )
+        infoParams.setMargins(0, 0, 0, 0)
+        root.addView(infoHud, infoParams)
 
         setContentView(root)
     }

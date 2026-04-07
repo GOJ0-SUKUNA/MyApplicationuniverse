@@ -13,6 +13,7 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
     private var lastX = 0f
     private var lastY = 0f
     private var statusListener: ((String) -> Unit)? = null
+    private var infoListener: ((String) -> Unit)? = null
 
     private val scaleDetector: ScaleGestureDetector
     private val gestureDetector: GestureDetector
@@ -22,6 +23,9 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
         renderer = StarfieldRenderer()
         renderer.statusCallback = { msg ->
             post { statusListener?.invoke(msg) }
+        }
+        renderer.infoCallback = { msg ->
+            post { infoListener?.invoke(msg) }
         }
 
         setRenderer(renderer)
@@ -67,6 +71,11 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
     fun setStatusListener(listener: (String) -> Unit) {
         statusListener = listener
         listener("Drag rotate | Pinch zoom | Tap select | Double tap local mode | Long press exotic mode")
+    }
+
+    fun setInfoListener(listener: (String) -> Unit) {
+        infoListener = listener
+        listener("No object selected")
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
