@@ -6,7 +6,7 @@ import java.nio.FloatBuffer
 import kotlin.math.cos
 import kotlin.math.sin
 
-class SphereMesh(stacks: Int = 14, slices: Int = 20) {
+class SphereMesh(stacks: Int = 22, slices: Int = 32) {
     val positionBuffer: FloatBuffer
     val normalBuffer: FloatBuffer
     val vertexCount: Int
