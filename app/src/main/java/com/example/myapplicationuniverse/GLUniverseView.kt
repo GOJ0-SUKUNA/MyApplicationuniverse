@@ -50,16 +50,12 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
         renderer = StarfieldRenderer()
 
         renderer.statusCallback = { msg ->
-            post {
-                statusListener?.invoke(msg + " | " + latestLiveShort)
-            }
+            post { statusListener?.invoke(msg + " | " + latestLiveShort) }
         }
 
         renderer.infoCallback = { msg ->
             latestObjectInfo = msg
-            post {
-                infoListener?.invoke(combinedInfo())
-            }
+            post { infoListener?.invoke(combinedInfo()) }
         }
 
         setRenderer(renderer)
@@ -71,6 +67,7 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
                     renderer.cameraDistance /= detector.scaleFactor
                     renderer.cameraDistance = renderer.cameraDistance.coerceIn(2.0f, 60f)
+                    renderer.emitStatus("Zoom updated")
                     return true
                 }
             }
@@ -80,23 +77,17 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
             context,
             object : GestureDetector.SimpleOnGestureListener() {
                 override fun onSingleTapUp(e: MotionEvent): Boolean {
-                    queueEvent {
-                        renderer.pickAt(e.x, e.y)
-                    }
+                    queueEvent { renderer.pickAt(e.x, e.y) }
                     return true
                 }
 
                 override fun onDoubleTap(e: MotionEvent): Boolean {
-                    queueEvent {
-                        renderer.toggleSystemMode()
-                    }
+                    queueEvent { renderer.toggleSystemMode() }
                     return true
                 }
 
                 override fun onLongPress(e: MotionEvent) {
-                    queueEvent {
-                        renderer.toggleExoticMode()
-                    }
+                    queueEvent { renderer.toggleExoticMode() }
                 }
             }
         )
@@ -113,7 +104,6 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
         if (refreshInFlight) return
         refreshInFlight = true
         latestLiveShort = "Live: refreshing..."
-
         statusListener?.invoke("Refreshing live space data...")
 
         Thread {
@@ -121,33 +111,24 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
             lastRefreshMs = System.currentTimeMillis()
             refreshInFlight = false
 
-            val stationPreview = if (summary.stationNames.isEmpty()) {
-                "none"
-            } else {
-                summary.stationNames.joinToString(", ")
-            }
-
-            val neoPreview = if (summary.neoNames.isEmpty()) {
-                "none"
-            } else {
-                summary.neoNames.joinToString(", ")
-            }
+            val stationPreview = if (summary.stationNames.isEmpty()) "none" else summary.stationNames.joinToString(", ")
+            val neoPreview = if (summary.neoNames.isEmpty()) "none" else summary.neoNames.joinToString(", ")
 
             latestLiveSummary =
                 "Status: " + summary.status +
-                "\nCelesTrak stations: " + summary.stationsCount +
-                "\nSample stations: " + stationPreview +
-                "\nNASA NEOs today: " + summary.neoCount +
-                "\nHazardous today: " + summary.hazardousCount +
-                "\nSample NEOs: " + neoPreview
+                    "\nCelesTrak stations: " + summary.stationsCount +
+                    "\nSample stations: " + stationPreview +
+                    "\nNASA NEOs today: " + summary.neoCount +
+                    "\nHazardous today: " + summary.hazardousCount +
+                    "\nSample NEOs: " + neoPreview
 
             latestLiveShort =
                 "Live: stations " + summary.stationsCount +
-                " | NEOs " + summary.neoCount +
-                " | hazardous " + summary.hazardousCount
+                    " | NEOs " + summary.neoCount +
+                    " | hazardous " + summary.hazardousCount
 
             post {
-                statusListener?.invoke("Live space data updated | " + latestLiveShort)
+                renderer.emitStatus("Live space data updated")
                 infoListener?.invoke(combinedInfo())
             }
         }.start()
@@ -155,12 +136,32 @@ class GLUniverseView(context: Context) : GLSurfaceView(context) {
 
     fun setStatusListener(listener: (String) -> Unit) {
         statusListener = listener
-        listener("Drag rotate | Pinch zoom | Tap select | Double tap local mode | Long press exotic mode | " + latestLiveShort)
+        listener("Loading... | " + latestLiveShort)
     }
 
     fun setInfoListener(listener: (String) -> Unit) {
         infoListener = listener
         listener(combinedInfo())
+    }
+
+    fun slowDownTime() {
+        queueEvent { renderer.slowDownTime() }
+    }
+
+    fun speedUpTime() {
+        queueEvent { renderer.speedUpTime() }
+    }
+
+    fun togglePause() {
+        queueEvent { renderer.togglePause() }
+    }
+
+    fun resetView() {
+        queueEvent { renderer.resetView() }
+    }
+
+    fun toggleMode() {
+        queueEvent { renderer.toggleSystemMode() }
     }
 
     override fun onDetachedFromWindow() {

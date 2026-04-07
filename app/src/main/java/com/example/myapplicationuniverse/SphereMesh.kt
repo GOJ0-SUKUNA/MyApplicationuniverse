@@ -35,15 +35,13 @@ class SphereMesh(stacks: Int = 22, slices: Int = 32) {
 
         vertexCount = positions.size / 3
 
-        positionBuffer = ByteBuffer
-            .allocateDirect(positions.size * 4)
+        positionBuffer = ByteBuffer.allocateDirect(positions.size * 4)
             .order(ByteOrder.nativeOrder())
             .asFloatBuffer()
         positions.forEach { positionBuffer.put(it) }
         positionBuffer.position(0)
 
-        normalBuffer = ByteBuffer
-            .allocateDirect(normals.size * 4)
+        normalBuffer = ByteBuffer.allocateDirect(normals.size * 4)
             .order(ByteOrder.nativeOrder())
             .asFloatBuffer()
         normals.forEach { normalBuffer.put(it) }

@@ -42,8 +42,7 @@ object LiveSpaceRepository {
 
             val stationNames = mutableListOf<String>()
             for (i in 0 until minOf(stationArray.length(), 4)) {
-                val obj = stationArray.getJSONObject(i)
-                stationNames.add(obj.optString("OBJECT_NAME", "Station-$i"))
+                stationNames.add(stationArray.getJSONObject(i).optString("OBJECT_NAME", "Station-$i"))
             }
 
             val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -53,19 +52,15 @@ object LiveSpaceRepository {
             val neoText = fetchText(
                 "https://api.nasa.gov/neo/rest/v1/feed?start_date=$today&end_date=$today&api_key=DEMO_KEY"
             )
-
             val neoRoot = JSONObject(neoText)
             val neoArray = neoRoot.getJSONObject("near_earth_objects").optJSONArray(today) ?: JSONArray()
 
             var hazardous = 0
             val neoNames = mutableListOf<String>()
-            for (i in 0 until minOf(neoArray.length(), 5)) {
-                val obj = neoArray.getJSONObject(i)
-                neoNames.add(obj.optString("name", "NEO-$i"))
-            }
             for (i in 0 until neoArray.length()) {
                 val obj = neoArray.getJSONObject(i)
                 if (obj.optBoolean("is_potentially_hazardous_asteroid", false)) hazardous++
+                if (i < 5) neoNames.add(obj.optString("name", "NEO-$i"))
             }
 
             LiveSpaceSummary(
