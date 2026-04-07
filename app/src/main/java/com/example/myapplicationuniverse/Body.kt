@@ -1,6 +1,7 @@
 package com.example.myapplicationuniverse
 
 data class Body(
+    val name: String,
     var x: Double,
     var y: Double,
     var vx: Double,
